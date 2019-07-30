@@ -26,6 +26,8 @@ class MonitorController(ControllerBase):
 
     @route('monitor', '/get_link_utilization', methods=['GET'])
     def get_utilization(self, req, **kwargs):
-        data = [{'link_utilization': self.topology_api_app.get_utilization()}]
+        utilization, queue_length = self.topology_api_app.get_utilization()
+        data = {'link_utilization': utilization,
+                'queue_length': queue_length}
         body = json.dumps(data)
         return Response(content_type='application/json', body=body)

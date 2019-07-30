@@ -21,9 +21,11 @@ from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
 
-import json
+import re
+from subprocess import *
 
-INTERVAL_S = 1      # The period of sending stat request.
+INTERVAL_S = 0.1      # The period of sending stat request.
+INTERFACE = 'r1-eth2'
 
 
 class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
@@ -92,24 +94,41 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         # self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
         #                                   indent=3, sort_keys=True))
 
-        self.logger.info('datapath         port     '
-                         'rx-pkts  rx-bytes rx-error '
-                         'tx-pkts  tx-bytes tx-error')
-        self.logger.info('---------------- -------- '
-                         '-------- -------- -------- '
-                         '-------- -------- --------')
+        # self.logger.info('datapath         port     '
+        #                  'rx-pkts  rx-bytes rx-error '
+        #                  'tx-pkts  tx-bytes tx-error')
+        # self.logger.info('---------------- -------- '
+        #                  '-------- -------- -------- '
+        #                  '-------- -------- --------')
         for stat in sorted(body, key=attrgetter('port_no')):
-            self.logger.info('%016x %8x %8d %8d %8d %8d %8d %8d',
-                             ev.msg.datapath.id, stat.port_no,
-                             stat.rx_packets, stat.rx_bytes, stat.rx_errors,
-                             stat.tx_packets, stat.tx_bytes, stat.tx_errors)
+            # self.logger.info('%016x %8x %8d %8d %8d %8d %8d %8d',
+            #                  ev.msg.datapath.id, stat.port_no,
+            #                  stat.rx_packets, stat.rx_bytes, stat.rx_errors,
+            #                  stat.tx_packets, stat.tx_bytes, stat.tx_errors)
+
             if (ev.msg.datapath.id == 2) and (stat.port_no == 0x2):
-                incremental_rx_bytes = stat.rx_bytes - self.last_rx_bytes
-                self.link_utilization = float(incremental_rx_bytes)/490000.0
+                last_rx_bytes = 0.2 * self.last_rx_bytes + 0.8 * stat.rx_bytes
+                incremental_rx_bytes = last_rx_bytes - self.last_rx_bytes
+                self.last_rx_bytes = last_rx_bytes
+                self.link_utilization = float(incremental_rx_bytes)/490000.0/INTERVAL_S
                 self.logger.info("==========incremental rx-bytes in the past %ds: %d, link utilization: %f=========",
                                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
-                self.last_rx_bytes = stat.rx_bytes
 
     def get_utilization(self):
-        return self.link_utilization
+        queue_length = QueueMonitor.get_queue_size()
+        return self.link_utilization, queue_length
+
+
+class QueueMonitor(object):
+    @staticmethod
+    def get_queue_size():
+        pat_queued = re.compile(r'backlog\s[^\s]+\s([\d]+)p')
+        cmd = "tc -s qdisc show dev %s" % INTERFACE
+        p = Popen(cmd, shell=True, stdout=PIPE)
+        output = p.stdout.read()
+        # Not quite right, but will do for now
+        matches = pat_queued.findall(output)
+        if matches and len(matches) > 1:
+            return int(matches[1])
+        return -1
 
