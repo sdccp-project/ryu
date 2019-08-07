@@ -24,7 +24,7 @@ from ryu.lib import hub
 import re
 from subprocess import *
 
-INTERVAL_S = 0.1      # The period of sending stat request.
+INTERVAL_S = 0.5      # The period of sending stat request.
 INTERFACE = 'r1-eth2'
 
 
