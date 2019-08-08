@@ -147,13 +147,18 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
 class QueueMonitor(object):
     @staticmethod
     def get_queue_size():
-        pat_queued = re.compile(r'backlog\s[^\s]+\s([\d]+)p')
+        pat_queued = re.compile(r'backlog\s(\d+k?)b')
         cmd = "tc -s qdisc show dev %s" % INTERFACE
         p = Popen(cmd, shell=True, stdout=PIPE)
         output = p.stdout.read()
         # Not quite right, but will do for now
         matches = pat_queued.findall(output)
         if matches and len(matches) > 1:
-            return int(matches[1])
+            res = matches[1]
+            if res.endswith('k'):
+                res = int(res[:-1]) * 1000
+            else:
+                res = int(res)
+            return res
         return -1
 
