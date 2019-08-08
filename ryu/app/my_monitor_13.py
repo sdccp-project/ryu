@@ -20,7 +20,7 @@ class MonitorController(ControllerBase):
 
     @route('monitor', '/test', methods=['GET'])
     def test(self, req, **kwargs):
-        data = [ {'test': 0} ]
+        data = [{'test': 0}]
         body = json.dumps(data)
         return Response(content_type='application/json', body=body)
 
@@ -29,5 +29,15 @@ class MonitorController(ControllerBase):
         utilization, queue_length = self.topology_api_app.get_utilization()
         data = {'link_utilization': utilization,
                 'queue_length': queue_length}
+        body = json.dumps(data)
+        return Response(content_type='application/json', body=body)
+
+    @route('monitor', '/get_user_link_utilization/{user_eth}',
+           methods=['GET'])
+    def get_user_utilization(self, req, user_eth, **kwargs):
+        def int_to_eth(i):
+            return "00:00:00:00:00:%s" % str(int(i)).zfill(2)
+        res = self.topology_api_app.get_utilization(user=int_to_eth(user_eth))
+        data = {'link_utilization of %s' % int_to_eth(user_eth): res}
         body = json.dumps(data)
         return Response(content_type='application/json', body=body)

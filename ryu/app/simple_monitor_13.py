@@ -40,6 +40,7 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         self.monitor_thread = hub.spawn(self._monitor)
         self.last_rx_bytes = 0
         self.link_utilization = 0.0
+        self.users_byte_count = {}
         self.users_utilization = {}
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
@@ -101,16 +102,15 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
             if ev.msg.datapath.id == 0x1 and \
                     stat.instructions[0].actions[0].port == 3:
                 eth_src = stat.match['eth_src']
-                pre_byte_count = self.users_utilization.get(eth_src, 0)
+                pre_byte_count = self.users_byte_count.get(eth_src, 0)
                 byte_count = stat.byte_count
                 users_bytes_increment[eth_src] = byte_count - pre_byte_count
-                self.users_utilization[eth_src] = stat.byte_count
+                self.users_byte_count[eth_src] = stat.byte_count
         count_of_users = len(users_bytes_increment)
-        users_utilization = {}
-        for user, bytes_increment in users_bytes_increment.items():
-            users_utilization[user] = bytes_increment / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S * count_of_users
-
-        self.logger.info('users utilization: %s', str(users_utilization))
+        if count_of_users:
+            for user, bytes_increment in users_bytes_increment.items():
+                self.users_utilization[user] = bytes_increment / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S * count_of_users
+        self.logger.info('users utilization: %s', str(self.users_utilization))
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
@@ -138,7 +138,9 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
                 self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
                                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
 
-    def get_utilization(self):
+    def get_utilization(self, user=None):
+        if user:
+            return self.users_utilization.get(user)
         queue_length = QueueMonitor.get_queue_size()
         return self.link_utilization, queue_length
 
