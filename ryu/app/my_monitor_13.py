@@ -37,7 +37,9 @@ class MonitorController(ControllerBase):
     def get_user_utilization(self, req, user_eth, **kwargs):
         def int_to_eth(i):
             return "00:00:00:00:00:%s" % str(int(i)).zfill(2)
-        res = self.topology_api_app.get_utilization(user=int_to_eth(user_eth))
-        data = {'link_utilization of %s' % int_to_eth(user_eth): res}
+        user_eth = int_to_eth(user_eth)
+        utilization, queue_length = self.topology_api_app.get_utilization(user=user_eth)
+        data = {'link_utilization': utilization,
+                'queue_length': queue_length}
         body = json.dumps(data)
         return Response(content_type='application/json', body=body)

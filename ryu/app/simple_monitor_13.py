@@ -139,10 +139,9 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
                                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
 
     def get_utilization(self, user=None):
-        if user:
-            return self.users_utilization.get(user)
         queue_length = QueueMonitor.get_queue_size()
-        return self.link_utilization, queue_length
+        link_utilization = self.users_utilization.get(user) if user else self.link_utilization
+        return link_utilization, queue_length
 
 
 class QueueMonitor(object):
