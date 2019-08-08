@@ -21,6 +21,10 @@ from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
 
+import json
+
+BOTTLENECK_BANDWIDTH_BytesPS = 490000.0
+
 import re
 from subprocess import *
 
@@ -36,6 +40,7 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         self.monitor_thread = hub.spawn(self._monitor)
         self.last_rx_bytes = 0
         self.link_utilization = 0.0
+        self.users_utilization = {}
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -67,26 +72,45 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         req = parser.OFPPortStatsRequest(datapath, 0, ofproto.OFPP_ANY)
         datapath.send_msg(req)
 
-    # @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
-    # def _flow_stats_reply_handler(self, ev):
-    #     body = ev.msg.body
-    #     self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
-    #                                       indent=3, sort_keys=True))
-    #
-    #     self.logger.info('datapath         '
-    #                      'in-port  eth-dst           '
-    #                      'out-port packets  bytes')
-    #     self.logger.info('---------------- '
-    #                      '-------- ----------------- '
-    #                      '-------- -------- --------')
-    #     for stat in sorted([flow for flow in body if flow.priority == 1],
-    #                        key=lambda flow: (flow.match['in_port'],
-    #                                          flow.match['eth_dst'])):
-    #         self.logger.info('%016x %8x %17s %8x %8d %8d',
-    #                          ev.msg.datapath.id,
-    #                          stat.match['in_port'], stat.match['eth_dst'],
-    #                          stat.instructions[0].actions[0].port,
-    #                          stat.packet_count, stat.byte_count)
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def _flow_stats_reply_handler(self, ev):
+        body = ev.msg.body
+        # self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
+        #                                   indent=3, sort_keys=True))
+        #
+        self.logger.info('datapath         '
+                         'in-port  eth-src           '
+                         'eth-dst           '
+                         'out-port packets  bytes')
+        self.logger.info('---------------- '
+                         '-------- ----------------- '
+                         '----------------- '
+                         '-------- -------- --------')
+        users_bytes_increment = {}
+        for stat in sorted([flow for flow in body if flow.priority == 1],
+                           key=lambda flow: (flow.match['in_port'],
+                                             flow.match['eth_dst'])):
+            # self.logger.info('eth_src: %s', stat.match['eth_src'])
+            self.logger.info('%016x %8x %17s %17s %8x %8d %8d',
+                             ev.msg.datapath.id,
+                             stat.match['in_port'],
+                             stat.match['eth_src'],
+                             stat.match['eth_dst'],
+                             stat.instructions[0].actions[0].port,
+                             stat.packet_count, stat.byte_count)
+            if ev.msg.datapath.id == 0x1 and \
+                    stat.instructions[0].actions[0].port == 3:
+                eth_src = stat.match['eth_src']
+                pre_byte_count = self.users_utilization.get(eth_src, 0)
+                byte_count = stat.byte_count
+                users_bytes_increment[eth_src] = byte_count - pre_byte_count
+                self.users_utilization[eth_src] = stat.byte_count
+        count_of_users = len(users_bytes_increment)
+        users_utilization = {}
+        for user, bytes_increment in users_bytes_increment.items():
+            users_utilization[user] = bytes_increment / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S * count_of_users
+
+        self.logger.info('users utilization: %s', str(users_utilization))
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
@@ -110,8 +134,8 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
                 last_rx_bytes = 0.2 * self.last_rx_bytes + 0.8 * stat.rx_bytes
                 incremental_rx_bytes = last_rx_bytes - self.last_rx_bytes
                 self.last_rx_bytes = last_rx_bytes
-                self.link_utilization = float(incremental_rx_bytes)/490000.0/INTERVAL_S
-                self.logger.info("==========incremental rx-bytes in the past %ds: %d, link utilization: %f=========",
+                self.link_utilization = float(incremental_rx_bytes) / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S
+                self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
                                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
 
     def get_utilization(self):
