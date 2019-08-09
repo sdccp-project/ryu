@@ -22,6 +22,8 @@ class MonitorController(ControllerBase):
     def test(self, req, **kwargs):
         data = [{'test': 0}]
         body = json.dumps(data)
+        print(type(req))
+        print(str(req.environ))
         return Response(content_type='application/json', body=body)
 
     @route('monitor', '/get_link_utilization', methods=['GET'])
