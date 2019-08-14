@@ -140,7 +140,7 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
 
     def get_utilization(self, user=None):
         queue_length = QueueMonitor.get_queue_size()
-        link_utilization = self.users_utilization.get(user) if user else self.link_utilization
+        link_utilization = self.users_utilization.get(user, 0) if user else self.link_utilization
         return link_utilization, queue_length
 
 
