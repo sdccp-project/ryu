@@ -30,6 +30,7 @@ from subprocess import *
 
 INTERVAL_S = 0.5      # The period of sending stat request.
 INTERFACE = 'r1-eth2'
+USE_EWMA = False
 
 
 class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
@@ -131,8 +132,13 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
             #                  stat.tx_packets, stat.tx_bytes, stat.tx_errors)
 
             if (ev.msg.datapath.id == 2) and (stat.port_no == 0x2):
-                last_rx_bytes = 0.2 * self.last_rx_bytes + 0.8 * stat.rx_bytes
-                incremental_rx_bytes = last_rx_bytes - self.last_rx_bytes
+                last_rx_bytes = 0
+                if USE_EWMA:
+                    last_rx_bytes = 0.2 * self.last_rx_bytes + 0.8 * stat.rx_bytes
+                    incremental_rx_bytes = last_rx_bytes - self.last_rx_bytes
+                else:
+                    last_rx_bytes = stat.rx_bytes
+                    incremental_rx_bytes = stat.rx_bytes - self.last_rx_bytes
                 self.last_rx_bytes = last_rx_bytes
                 self.link_utilization = float(incremental_rx_bytes) / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S
                 self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
