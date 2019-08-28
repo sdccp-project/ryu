@@ -22,6 +22,12 @@ from ryu.controller.handler import set_ev_cls
 from ryu.lib import hub
 
 import json
+import os
+from ryu.lib import hub
+import time
+
+BUILD_DIR = '/home/lam/Projects/sdccp/ryu/build/'
+LOG_FILE = BUILD_DIR + 'log.txt'
 
 BOTTLENECK_BANDWIDTH_BytesPS = 490000.0
 
@@ -43,6 +49,20 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         self.link_utilization = 0.0
         self.users_byte_count = {}
         self.users_utilization = {}
+        self.users_sending_rate = {}
+        self.link_sending_rate_bps = 0.0
+        if not os.path.exists(BUILD_DIR):
+            os.mkdir(BUILD_DIR)
+        if os.path.exists(LOG_FILE):
+            os.remove(LOG_FILE)
+        self.log_thread = hub.spawn(self.log_utilization)
+
+    def log_utilization(self):
+        while True:
+            queue_bits = QueueMonitor.get_queue_size()
+            open(LOG_FILE, 'a+') \
+                .write("%s %f %d\n" % (time.time(), self.link_sending_rate_bps, queue_bits))
+            hub.sleep(INTERVAL_S)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -141,6 +161,7 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
                     incremental_rx_bytes = stat.rx_bytes - self.last_rx_bytes
                 self.last_rx_bytes = last_rx_bytes
                 self.link_utilization = float(incremental_rx_bytes) / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S
+                self.link_sending_rate_bps = float(incremental_rx_bytes) / INTERVAL_S * 8
                 self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
                                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
 
@@ -157,7 +178,6 @@ class QueueMonitor(object):
         cmd = "tc -s qdisc show dev %s" % INTERFACE
         p = Popen(cmd, shell=True, stdout=PIPE)
         output = p.stdout.read()
-        # Not quite right, but will do for now
         matches = pat_queued.findall(output)
         if matches and len(matches) > 1:
             res = matches[1]
@@ -167,4 +187,3 @@ class QueueMonitor(object):
                 res = int(res)
             return res
         return -1
-
