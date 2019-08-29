@@ -58,8 +58,10 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
     def log_utilization(self):
         while True:
             queue_bits = QueueMonitor.get_queue_size()
+            user_link_utilization = self.users_utilization.values()[0] if self.users_utilization else 0
             f = open(LOG_FILE, 'a+')
-            f.write("%s %f %d\n" % (time.time(), self.link_sending_rate_bps, queue_bits))
+            f.write("%s %f %d %f\n" %
+                    (time.time(), self.link_sending_rate_bps, queue_bits, user_link_utilization))
             f.close()
             hub.sleep(INTERVAL_S)
 
