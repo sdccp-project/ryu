@@ -23,13 +23,10 @@ from ryu.lib import hub
 
 import json
 import os
-from ryu.lib import hub
 import time
 
 BUILD_DIR = '/home/lam/Projects/sdccp/ryu/build/'
 LOG_FILE = BUILD_DIR + 'log.txt'
-
-BOTTLENECK_BANDWIDTH_BytesPS = 490000.0
 
 import re
 from subprocess import *
@@ -51,6 +48,7 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         self.users_utilization = {}
         self.users_sending_rate = {}
         self.link_sending_rate_bps = 0.0
+        self.bottleneck_capacity_Bps = -1
         if not os.path.exists(BUILD_DIR):
             os.mkdir(BUILD_DIR)
         if os.path.exists(LOG_FILE):
@@ -60,8 +58,9 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
     def log_utilization(self):
         while True:
             queue_bits = QueueMonitor.get_queue_size()
-            open(LOG_FILE, 'a+') \
-                .write("%s %f %d\n" % (time.time(), self.link_sending_rate_bps, queue_bits))
+            f = open(LOG_FILE, 'a+')
+            f.write("%s %f %d\n" % (time.time(), self.link_sending_rate_bps, queue_bits))
+            f.close()
             hub.sleep(INTERVAL_S)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
@@ -100,26 +99,26 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         # self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
         #                                   indent=3, sort_keys=True))
         #
-        self.logger.info('datapath         '
-                         'in-port  eth-src           '
-                         'eth-dst           '
-                         'out-port packets  bytes')
-        self.logger.info('---------------- '
-                         '-------- ----------------- '
-                         '----------------- '
-                         '-------- -------- --------')
+        # self.logger.info('datapath         '
+        #                  'in-port  eth-src           '
+        #                  'eth-dst           '
+        #                  'out-port packets  bytes')
+        # self.logger.info('---------------- '
+        #                  '-------- ----------------- '
+        #                  '----------------- '
+        #                  '-------- -------- --------')
         users_bytes_increment = {}
         for stat in sorted([flow for flow in body if flow.priority == 1],
                            key=lambda flow: (flow.match['in_port'],
                                              flow.match['eth_dst'])):
             # self.logger.info('eth_src: %s', stat.match['eth_src'])
-            self.logger.info('%016x %8x %17s %17s %8x %8d %8d',
-                             ev.msg.datapath.id,
-                             stat.match['in_port'],
-                             stat.match['eth_src'],
-                             stat.match['eth_dst'],
-                             stat.instructions[0].actions[0].port,
-                             stat.packet_count, stat.byte_count)
+            # self.logger.info('%016x %8x %17s %17s %8x %8d %8d',
+            #                  ev.msg.datapath.id,
+            #                  stat.match['in_port'],
+            #                  stat.match['eth_src'],
+            #                  stat.match['eth_dst'],
+            #                  stat.instructions[0].actions[0].port,
+            #                  stat.packet_count, stat.byte_count)
             if ev.msg.datapath.id == 0x1 and \
                     stat.instructions[0].actions[0].port == 3:
                 eth_src = stat.match['eth_src']
@@ -130,7 +129,8 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
         count_of_users = len(users_bytes_increment)
         if count_of_users:
             for user, bytes_increment in users_bytes_increment.items():
-                self.users_utilization[user] = bytes_increment / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S * count_of_users
+                self.logger.info('{} {} {}'.format(user, bytes_increment, self.bottleneck_capacity_Bps))
+                self.users_utilization[user] = bytes_increment / float(self.bottleneck_capacity_Bps) / INTERVAL_S * count_of_users
         self.logger.info('users utilization: %s', str(self.users_utilization))
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
@@ -160,15 +160,19 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
                     last_rx_bytes = stat.rx_bytes
                     incremental_rx_bytes = stat.rx_bytes - self.last_rx_bytes
                 self.last_rx_bytes = last_rx_bytes
-                self.link_utilization = float(incremental_rx_bytes) / BOTTLENECK_BANDWIDTH_BytesPS / INTERVAL_S
+                self.link_utilization = float(incremental_rx_bytes) / self.bottleneck_capacity_Bps / INTERVAL_S
                 self.link_sending_rate_bps = float(incremental_rx_bytes) / INTERVAL_S * 8
-                self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
-                                 INTERVAL_S, incremental_rx_bytes, self.link_utilization)
+                # self.logger.info("==========incremental rx-bytes in the past %.1fs: %d, link utilization: %f=========",
+                #                  INTERVAL_S, incremental_rx_bytes, self.link_utilization)
 
     def get_utilization(self, user=None):
         queue_length = QueueMonitor.get_queue_size()
         link_utilization = self.users_utilization.get(user, 0) if user else self.link_utilization
         return link_utilization, queue_length
+
+    def set_bottleneck_capacity_Bps(self, capacity_Bps):
+        self.logger.info('set capacity in Bytes/s: %d' % capacity_Bps)
+        self.bottleneck_capacity_Bps = capacity_Bps
 
 
 class QueueMonitor(object):

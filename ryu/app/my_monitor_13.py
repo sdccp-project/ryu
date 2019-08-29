@@ -45,3 +45,16 @@ class MonitorController(ControllerBase):
                 'queue_length': queue_length}
         body = json.dumps(data)
         return Response(content_type='application/json', body=body)
+
+    @route('monitor', '/set_bottleneck_capacity_Bps',
+           methods=['PUT'])
+    def set_bottleneck_capacity_Bps(self, req, **kwargs):
+        try:
+            rest = req.json if req.body else {}
+        except ValueError:
+            print('invalid syntax %s', req.body)
+            return Response(status=400)
+        print(rest)
+        capacity = int(rest['bottleneck_capacity_Bps'])
+        self.topology_api_app.set_bottleneck_capacity_Bps(capacity)
+
