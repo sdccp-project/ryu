@@ -38,7 +38,10 @@ class MonitorController(ControllerBase):
            methods=['GET'])
     def get_user_utilization(self, req, user_eth, **kwargs):
         def int_to_eth(i):
-            return "00:00:00:00:00:%s" % str(int(i)).zfill(2)
+            i = int(i)
+            if i > 2:
+                i += 1
+            return "00:00:00:00:00:%s" % str(i).zfill(2)
         user_eth = int_to_eth(user_eth)
         utilization, queue_length = self.topology_api_app.get_utilization(user=user_eth)
         data = {'link_utilization': utilization,

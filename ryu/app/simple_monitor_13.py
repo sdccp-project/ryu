@@ -25,11 +25,13 @@ import json
 import os
 import time
 
-BUILD_DIR = '/home/lam/Projects/sdccp/ryu/build/'
-LOG_FILE = BUILD_DIR + 'log.txt'
-
 import re
 from subprocess import *
+
+BUILD_DIR = '/home/lam/Projects/sdccp/ryu/build/'
+LOG_FILE = BUILD_DIR + 'log.txt'
+FLOW_LOG_FILE = BUILD_DIR + 'flow_log.txt'
+REDUCE_FACTOR = 0.9        # This is to calibrate the link utilization
 
 INTERVAL_S = 0.5      # The period of sending stat request.
 INTERFACE = 'r1-eth2'
@@ -53,16 +55,23 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
             os.mkdir(BUILD_DIR)
         if os.path.exists(LOG_FILE):
             os.remove(LOG_FILE)
+        if os.path.exists(FLOW_LOG_FILE):
+            os.remove(FLOW_LOG_FILE)
         self.log_thread = hub.spawn(self.log_utilization)
 
     def log_utilization(self):
         while True:
             queue_bits = QueueMonitor.get_queue_size()
             user_link_utilization = self.users_utilization.values()[0] if self.users_utilization else 0
-            f = open(LOG_FILE, 'a+')
-            f.write("%s %f %d %f\n" %
-                    (time.time(), self.link_sending_rate_bps, queue_bits, user_link_utilization))
-            f.close()
+            with open(LOG_FILE, 'a+') as f:
+                f.write("%s %f %d %f\n" %
+                        (time.time(), self.link_sending_rate_bps, queue_bits, user_link_utilization))
+            formatted_str = str(len(self.users_sending_rate)) + ' '
+            for eth, rate in self.users_sending_rate.items():
+                formatted_str += str(eth) + '\t' + str(rate) + '\t'
+            with open(FLOW_LOG_FILE, 'a+') as f:
+                f.write("%s %s\n" %
+                        (time.time(), formatted_str))
             hub.sleep(INTERVAL_S)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
@@ -98,8 +107,9 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
         body = ev.msg.body
-        # self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
-        #                                   indent=3, sort_keys=True))
+        # if ev.msg.datapath.id == 0x2:
+        #     self.logger.info('%s', json.dumps(ev.msg.to_jsondict(), ensure_ascii=True,
+        #                                       indent=3, sort_keys=True))
         #
         # self.logger.info('datapath         '
         #                  'in-port  eth-src           '
@@ -121,18 +131,30 @@ class SimpleMonitor13(simple_switch_13.SimpleSwitch13):
             #                  stat.match['eth_dst'],
             #                  stat.instructions[0].actions[0].port,
             #                  stat.packet_count, stat.byte_count)
-            if ev.msg.datapath.id == 0x1 and \
-                    stat.instructions[0].actions[0].port == 3:
+            # if ev.msg.datapath.id == 0x1 and \
+            #         stat.instructions[0].actions[0].port == 3:
+            #     eth_src = stat.match['eth_src']
+            #     pre_byte_count = self.users_byte_count.get(eth_src, 0)
+            #     byte_count = stat.byte_count
+            #     users_bytes_increment[eth_src] = byte_count - pre_byte_count
+            #     self.users_byte_count[eth_src] = stat.byte_count
+            if ev.msg.datapath.id == 0x2 and \
+                    stat.instructions[0].actions[0].port == 1:
                 eth_src = stat.match['eth_src']
                 pre_byte_count = self.users_byte_count.get(eth_src, 0)
                 byte_count = stat.byte_count
-                users_bytes_increment[eth_src] = byte_count - pre_byte_count
+                bytes_incre = byte_count - pre_byte_count
+                users_bytes_increment[eth_src] = bytes_incre
+                self.users_sending_rate[eth_src] = bytes_incre / INTERVAL_S * 8
                 self.users_byte_count[eth_src] = stat.byte_count
+
         count_of_users = len(users_bytes_increment)
         if count_of_users:
             for user, bytes_increment in users_bytes_increment.items():
-                self.logger.info('{} {} {}'.format(user, bytes_increment, self.bottleneck_capacity_Bps))
-                self.users_utilization[user] = bytes_increment / float(self.bottleneck_capacity_Bps) / INTERVAL_S * count_of_users
+                self.logger.info('{} {}/{}'.format(user, bytes_increment, self.bottleneck_capacity_Bps * INTERVAL_S))
+                self.users_utilization[user] = bytes_increment / \
+                                               (float(self.bottleneck_capacity_Bps) * INTERVAL_S / count_of_users) / \
+                                               REDUCE_FACTOR
         self.logger.info('users utilization: %s', str(self.users_utilization))
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
